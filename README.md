@@ -2,7 +2,7 @@
 
 references:
 1. https://towardsdatascience.com/a-summary-of-udacity-a-b-testing-course-9ecc32dedbb1
-2. <<A collection of Data Science Take-home Challenges>> by Giulio Palombo
+2. "A collection of Data Science Take-home Challenges" by Giulio Palombo
 
 
 
