@@ -120,3 +120,26 @@ As you can see, conclusions usually end up being about:
     - User value prediction (for prioritizing new users)
 
 
+
+## Fraud detection
+
+People who commit fraud would like to repeat it if not being caught. 
+
+The goal of fraud detection:
+1. Find the fraud patterns, and identify existing fraud
+2. Build prediction model, deal with potential fraud
+
+The general idea is to build a ML model using existing labeled dataset, and use model output insights for goal 1, and use model itself for goal 2.
+
+Before jumping into building a model, think about whether you can create new powerful variables. This is
+called feature engineering and it is the most important step in machine learning. However, feature
+engineering is quite time consuming. In a take-home you should just give an idea of how you would do it
+and emphasize that with more time you would go deeper into it.
+A few obvious variables that can be created here could be:
+* Time difference between sign-up time and purchase time
+* If the device id is unique or certain users are sharing the same device (many different user ids using
+the same device could be an indicator of fake accounts)
+* Same for the ip address. Many different users having the same ip address could be an indicator of
+fake accounts
+* Usual week of the year and day of the week from time variables
+
