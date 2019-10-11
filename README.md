@@ -103,14 +103,16 @@ Ask yourself a few questions:
 *	Dn/Wn/Mn retention rate: a short-term proxy for long term retention rate
 
 ###	Stickiness: get people to come back on their own volition, so to reduce dependency on tactics such as push notifications
-*	DAU/MAU: the percentage of the users who are active on a monthly basis who also are also active on a daily basis
-*	Lness:
+
+* DAU/MAU: the percentage of the users who are active on a monthly basis who also are also active on a daily basis
+* Lness:
   -	L5+/7: percentage of the people who at least visit 5 times per week
   -	L21+/28: percentage of the people who at least visit 21 times per month
-*	Sticky retention: DoD/WoW retention
+* Sticky retention: DoD/WoW retention
   -	E.g. WoW retention is week-over-week retention, the ratio of the users who are active last week that are also active this week
 
 ###	Engagement: good sign for product-market fit, the most important driver of retention
+
 *	Time spent / DAU
 *	#sessions
 *	Time spent/session
