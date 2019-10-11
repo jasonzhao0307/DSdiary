@@ -44,9 +44,10 @@
     - adjusted p-value = p-value * n/r, where n=#tests, r is the rank of this p-value in ascending ordered p-values
   - Bootstrap 
   
-*	Multiple metrics not moving to same direction
+* Multiple metrics not moving to same direction
   - Learning effect or Short term effect, what would be long term result?
   - ROI or value of the new feature?
+
 *	Use OEC: overall evaluation criterion
 
 
