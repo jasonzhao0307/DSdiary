@@ -6,6 +6,20 @@ references:
 
 
 
+## 4-step A/B test preparation
+* Unit of diversion
+* Metric of measurement
+* Test duration
+* Sample size
+  - power analysis
+    - Statistical power, 1-beta
+    - Significance level, alpha, t1e
+    - Baseline rate
+    - Minimum detectable effect
+
+
+
+
 ## 4-step framework for metric change (diagnostic questions, before A/B test):
 
 * External factors: big events? Seasonality? Competitor launch new feature? Industry trend?
