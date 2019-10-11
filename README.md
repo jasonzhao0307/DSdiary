@@ -37,8 +37,13 @@
 ## Deal with multiple metrics in AB test:
 * Do multiple comparison
   - FWER, like Bonferroni correction
+    - family-wise error rate (FWER) is the probability of making one or more false discoveries, or type I errors when performing multiple hypotheses tests
+    - Bonferroni alpha threshold: alpha/n, where n=#tests
   - FDR correction like BH process
+    - False Discovery Rate controls the expected proportion of "discoveries" (rejected null hypotheses) that are false (incorrect rejections)
+    - adjusted p-value = p-value * n/r, where n=#tests, r is the rank of this p-value in ascending ordered p-values
   - Bootstrap 
+  
 *	Multiple metrics not moving to same direction
   - Learning effect or Short term effect, what would be long term result?
   - ROI or value of the new feature?
