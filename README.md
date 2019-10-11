@@ -15,7 +15,7 @@
 
 ## 5-step framework for metric not significant (or weird result) after A/B test
 
-* Sanity check of invariant metrics or sample size, make sure the experiment set-up is correct
+* Sanity check of invariant metrics, make sure the experiment set-up is correct
 * sample size not large enough
   - check how test p-values and also target metric change over time. 
     - If the variance is very large, that means the sample size is not enough. If the variance is small, it means we have enough sample size.
@@ -28,30 +28,35 @@
 *	Use non-parametric methods to test
 
 
-## 2-step framework for metric not significant/weird after rolling out to all users:
-* Learning effect: change aversion or novelty effect, need more time get plateau state
-*	Seasonality: could add a hold-out group not launching new feature to compare to control
-
-
 
 ## Deal with multiple metrics in AB test:
 * Do multiple comparison
   - FWER, like Bonferroni correction
-    - family-wise error rate (FWER) is the probability of making one or more false discoveries, or type I errors when performing multiple hypotheses tests
+    - family-wise error rate (FWER): probability that any metric shows false positive.
     - Bonferroni alpha threshold: alpha/n, where n=#tests
   - FDR correction like BH process
-    - False Discovery Rate controls the expected proportion of "discoveries" (rejected null hypotheses) that are false (incorrect rejections)
+    - False Discovery Rate: the proportion of false positive in all rejections. # false positives / # total rejection
     - adjusted p-value = p-value * n/r, where n=#tests, r is the rank of this p-value in ascending ordered p-values
-  - Bootstrap 
+  - Bootstrap to see if still significant
   
 * Multiple metrics not moving to same direction
-  - Learning effect or Short term effect, what would be long term result?
-  - ROI or value of the new feature?
+  - Learning effect or Short term effect, might change in long term result.
+  - Is ROI or value of the new feature good enough?
+  - Use OEC: overall evaluation criterion.
+    - A good OEC gives you a balance between short-term and long-term goal, or the balance between different metrics.
 
-*	Use OEC: overall evaluation criterion
+
+## Then how do I decide whether to launch the change or not?
+Ask yourself a few questions: 
+
+* Do I have statistically significant and practically significant result in order to justify the change? 
+* Do I understand what the change actually done to our user experience? 
+* Last but not the least, is it worth it to launch?
 
 
-
+## 2-step framework for metric not significant/weird after rolling out to all users:
+* Learning effect: change aversion or novelty effect, need more time get plateau state
+*	Seasonality: could add a hold-out group not launching new feature to compare to control
 
 
 ## Product health diagnosis/measurement
@@ -146,4 +151,18 @@ the same device could be an indicator of fake accounts)
 * Same for the ip address. Many different users having the same ip address could be an indicator of
 fake accounts
 * Usual week of the year and day of the week from time variables
+
+
+## What features to add?
+Again, not tempted to be a visionary. Starting from the datasets. Look at current data and check where you want to incentivize people to do. Then simplify the procedures. You can also learn from customer needs through complaints or comments. Then A/B testing to see if it can satisfy your needs.
+Eg: figure out a way for a user to finish things in one click/ check use case to find opportunities
+
+
+## Should we introduce XXX feature?
+Layer of logic:
+
+1. If add, what benefits will we get?
+2. Do we have customer needs? (check from comments or user behavior)
+3. A/B testing process
+
 
