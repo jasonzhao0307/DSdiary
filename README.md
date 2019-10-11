@@ -66,21 +66,19 @@
 * DAU/WAU/MAU: choose which depends on expected user action
 *	D/D, W/W, M/M, Y/Y changes: e.g. 28-day rolling window difference
 *	Quick ratio: (#new user + #resurrected user) / (# churned user), between time points T1 and T2. The numbers are on T2, comparing to T1. 
--	Growth = new users + resurrected users + retained users – churned users
--	Because delta(growth) = new users + resurrected users – churned users. 
+  -	Growth = new users + resurrected users + retained users – churned users
+  -	delta(growth) = new users + resurrected users – churned users. 
 
 ###	Retention: best indicator of product value and product-market fit, most important lever for growth. Get people to come back.
 *	Dn/Wn/Mn retention rate: a short-term proxy for long term retention rate
 
 ###	Stickiness: get people to come back on their own volition, so to reduce dependency on tactics such as push notifications
 *	DAU/MAU: the percentage of the users who are active on a monthly basis who also are also active on a daily basis
-
 *	Lness:
--	L5+/7: percentage of the people who at least visit 5 times per week
--	L21+/28: ……21 times….per month
-
+  -	L5+/7: percentage of the people who at least visit 5 times per week
+  -	L21+/28: percentage of the people who at least visit 21 times per month
 *	Sticky retention: DoD/WoW retention
--	E.g. WoW retention is week-over-week retention, the ratio of the users who are active last week that are also active this week
+  -	E.g. WoW retention is week-over-week retention, the ratio of the users who are active last week that are also active this week
 
 ###	Engagement: good sign for product-market fit, the most important driver of retention
 *	Time spent / DAU
