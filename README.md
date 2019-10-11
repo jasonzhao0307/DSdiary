@@ -49,6 +49,28 @@ references:
     - A good OEC gives you a balance between short-term and long-term goal, or the balance between different metrics.
 
 
+## What if we can't do A/B test?
+* Analyze the user activity logs
+* Conduct retrospective analysis
+*	Conduct user experience research (UER)
+*	Focus groups and surveys
+*	Human evaluation
+
+## How to deal with network effects while choosing unit of diversion (样本单位)? 
+
+network effects(spillover effects)： users are not independent in some small space. 
+
+* To solve the network effect, you could choose samples from 2 different locations so that they are independent and not connected to each other. 
+  - However, this might introduce selection bias that people from two locations are different. To solve this issue, we could do diff-n-diff: difference in difference. The idea is, even if there is selection bias, we could adjust that by:
+    1. calculate test group metric change rate (after experiment vs. before experiment)
+    2. calculate control group metric change rate (after experiment vs. before experiment)
+    3. calculate how test group metric change rate change from control group metric change rate. 
+* Another idea is, we could choose a new unit of diversion that is different from unit of analysis, so you need to run a pre-period A/A test to calculate empirical variance to get sample size.
+
+
+
+
+
 ## Then how do I decide whether to launch the change or not?
 Ask yourself a few questions: 
 
