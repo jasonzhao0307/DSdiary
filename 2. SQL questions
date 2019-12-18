@@ -1,0 +1,2472 @@
+Timestamp(date, time) :combine date and time
+EXP:
+select TIMESTAMP("2017-07-24",  "13:10:11");
+Timestampdiff(hour, TIMESTAMP("2017-07-24", "13:10:11"),TIMESTAMP("2017-07-23", "13:10:11"))
+
+
+datediff('day', early_time, late_time) will be positive value!
+early_time - late_time > 0
+
+Here’s a basic example where we find out the number of days between two dates:
+
+SELECT DATEDIFF(day, '2001-01-01', '2002-01-01') AS Result;
+Result:
+
++----------+
+| Result   |
+|----------|
+| 365      |
++----------+
+
+
+
+# note that:
+
+1. for population metrics like #session/user, or #sesssion per user,
+note that =it is just one number!
+
+we could just sum(#session) / sum(#user),
+because it is equal to avg(#session for user1, ... #session for userN). Note that in
+this case, we don not need to generate each user level number and do avg.
+Note that we need to times 1.0 in the numerator to change the data type to float.
+Note that we could use sum(if(...,1,0)) if the filtering condition is the same for numerator and denominator.
+
+
+2. for user level metrics like success_rate for each user, note: for! instead of per!
+we need to do this on user level, i.e. get the success_rate for each user. Then if the question
+is asking the average success_rate per user, we do avg(success_rate) across all users. Similarly,
+
+
+3. if calculate a ratio, like CTR, to dedup on user level we should use two-table method! (one for numertor and one for denominator)
+Otherwise, we could do sum(if)
+
+
+4.  ratio per day:  add day as grouping first
+    #actions per day:  do not add date as grouping first, do the overall division
+   ratio per person:  add user as grouping first
+   #session per person: do not add person as grouping, do the overall division
+   (#session per person) per day: for inner, do the overall, for outer, add date as grouping, e.g. QUESTION 30
+
+
+-- QUESTION 1
+
+
+Event-level data: an attendance log for every student in a school district
+
+date | student_id | attendance
+
+Dimension-level data: a summary table with demographics for each student in the district
+
+student_id | school_id | grade_level | date_of_birth | hometown
+
+Using this data, you could answer questions like the following:
+
+1.What was the overall attendance rate for the school district yesterday?
+2.Which grade level currently has the most students in this school district?
+3.Which school had the highest attendance rate? The lowest?
+
+
+1.
+
+select count(distinct student_id)/(select count(distinct student_id) from school) from attendance
+where datediff('day', date, curdate()) = 1
+and attendance = 1
+
+2.
+select grade_level from
+(select grade_level, count(distinct student_id) as cnt from school
+group by 1
+order by 2 desc
+limit 1) t1
+
+3.
+
+select t2.school_id, avg(cnt_att)/cnt_total as att_rate from
+(select s.school_id, a.date, coalesce(count(distinct a.student_id),0) as cnt_att from attendance a
+right join school s
+on a.student_id = s.student_id
+where attendance = 1
+group by 1,2) t2
+join
+(select school_id, count(distinct student_id) as cnt_total from school
+grouo by 1) t1
+on t1.school_id = t2.school_id
+group by 1
+order by 2 desc
+limit 1
+
+
+
+-- an alternative
+create table t1 (
+ select school_id, count(distinct student_id) as student_num
+ from school
+ group by 1
+);
+
+create table t2 (
+ select date, s.school_id, coalesce(count(distinct student_id), 0) as student_num_attend
+ from attend a join school s
+ on a.student_id = s.student_id
+ and a.attendance == 1
+ group by 1,2
+);
+
+
+
+select school_id, avg(ratio) as ratio_avg from
+(select t2.date, t1.school_id, t1.student_num/t2.student_num_attend as ratio
+from t1 join t2
+on t1.school_id == t2.school_id) ratio_daily
+group by 1
+order by 2 desc
+limit 1
+
+
+/*
+review: in general pretty good, but notice: in Q1 the attendance column should be used !!! Read more carefully about each column
+also, in Q3, notice that we should group by school and date and attend student number first, and then get the average across dates to get
+average attending students number for each school.
+*/
+
+
+
+
+-- QUESTION 2
+
+Comments I
+name | post_id | num_comments
+
+e.g.
+
+jason  post_id_1  12
+jason  post_id_2  5
+jack   post_id_3  53
+
+Calculate the average comments for the users with >= 2 posts, and each post has comments greater or equal to 40
+
+-- understand the question by: the user has at least 2 posts with comments >= 40
+
+
+select name, avg(comments) as avg_num_comment from table
+where name in
+(
+select name from table
+where comments >= 40
+group by 1
+having count(posts) >= 2
+) t1
+group by 1
+
+
+
+
+Review:
+/*
+
+This questions uses the subquery + logic condition
+
+if we want to get the single value for average number of comments for all these qualified users,
+we could add another layer:
+
+select avg(avg_num_comment) as avg_final from (xxxxxxx)
+
+xxxxx is what we have for this question
+
+*/
+
+
+
+
+-- QUESTION 3
+
+
+You have one table named content_action which has 5 fields:
+Date,
+User_id (content_creator_id),
+Content_id (this is the primary key),
+Content_type (with 4 types: status_update, photo, video, comment),
+Target_id (it’s the original content_id associated with the comment, if the content type is not comment, this will be null)
+
+Question:
+1.find the distribution of stories（photo+video） based on comment count?
+2.what if content_type becomes (comment/ post), what is the distribution of comments?
+3.Now what if content_type becomes {comment, post, video, photo, article}，what is the comment distribution for each content type?
+
+
+
+1.
+create table t1 (
+select a.content_id, coalesce(count(b.content_id), 0) as cnt from
+  content_action a left join content_action b
+  on a.content_id = b.target_id
+  and a.content_type in ('video', 'photo')
+  and b.content_type = 'comment'
+  group by 1
+);
+
+select cnt, count(content_id) as freq from t1
+group by 1
+
+
+2.
+
+create table t1 (
+select a.content_id, coalesce(count(b.content_id),0) as cnt from
+  content_action a left join content_action b
+  on a.content_id = b.target_id
+  and a.content_type = 'post'
+  and b.content_type = 'comment'
+  group by 1
+);
+
+select cnt, count(content_id) as freq from t1
+group by 1
+
+
+3.
+
+
+select Content_type, cnt, count(Content_id) as freq from
+(select t1.Content_id, t1.Content_type, coalesce(count(t2.Content_id), 0) as cnt from
+table t1 left join
+ table t2
+on t1.content_id = t2.target_id
+and t1.Content_type != 'comment'
+and t2.Content_type = 'comment'
+group by 1,2) t3
+group by 1,2
+order by 1,2
+
+-- when the content_type is comment,
+-- target_id just by name should mean something that could be traced back to the original post/video/photo this comment comments on
+-- user_id and date seems not helpful in this case
+-- notice that we used left join here. Self join could be done by cross join like we do in QUESTION 3 (which doesn't consider the 'no comment' situation)
+-- or by inner join or left/right join way that we use in QUESTION 3.5 (which consider the special situation when there is no comment for some post/video)
+
+
+
+QUESTION 4.0
+table: date | sender | receiver | n_msg
+
+how to get this table to the one in QUESTION 4? (make user pair unique, and have total n_msg between the two)
+
+e.g.
+
+Jan.1  A  B 10
+Jan.1  B  A 15
+Jan.1  A  C 20
+Jan.1  C  E 30
+
+we want:
+Jan.1  A  B 25
+Jan.1  A  C 20
+Jan.1  C  E 30
+
+after the union all we have:
+Jan.1  A  B 10
+Jan.1  B  A 10
+Jan.1  B  A 15
+Jan.1  A  B 15
+Jan.1  A  C 20
+Jan.1  C  A 20
+Jan.1  C  E 30
+Jan.1  E  C 30
+
+
+select date, u1, u2, sum(n_msg) as n_msg from
+(select date, sender as u1, receiver as u2, n_msg from table
+union all
+select date, receiver as u1, sender as u2, n_msg from table) tmp
+where u1 < u2 -- dedup
+group by 1,2,3
+
+-- QUESTION 4
+
+
+Messages
+table: date | u1 | u2 | n_msg
+
+n_msg: the number of messsages between one unique user pair at someday.
+
+What can we get some insights from this table?
+user activities, represent closeness.
+
+1.Write a query about the distribution of number of conversations among users on someday.
+Before we run any SQL, what is your gut sense that what the distribution will look like? Why?
+exponential distribution, skewed to the right.
+negative binomial (count data), skewed to the right
+
+
+2.get the top partner id who sends the most number of messages to each user -- THIS is important (sum(n_msg))
+2.5 get the top partner id who has the most number of conversations to each user -- THIS is important (count(*))
+
+3.Write a query that we can find the top partner who sends the most number of messages to each user.
+
+And then add a outer query to calculate the following ratio:
+sum(n_msg_with_top_partners) / sum(n_msg_with_all_contacts)
+
+
+
+
+-- 1. clean version
+
+-- number of conversations for each user
+create table t1(
+select u, count(*) as num_conv from
+(select u1 as u from table
+union all
+select u2 as u from table) tmp
+group by 1
+);
+
+select num_conv, count(u) from t1
+group by 1
+order by 2
+
+
+
+
+
+
+-- 1.
+
+select cnt, count(u) from
+(select u, count(*) as cnt from
+(select u1 as u from table
+ where date = someday
+union all
+select u2 as u from table
+ where date = someday
+) t1
+group by 1
+) t2
+group by 1
+
+
+
+
+
+2.
+
+create table t1 (
+  select u, ux, sum(n_msg) as sum_msg from
+(select date, u1 as u, u2 as ux, n_msg from table
+  union
+select date, u2 as u, u1 as ux, n_msg from table  )
+  group by 1,2
+);
+
+select t1.u, t1.ux, t2.max_msg from
+t1 join
+(select u, max(sum_msg) as max_msg from t1
+group by 1) t2
+on t1.u = t2.u
+and t1.n_msg = t2.max_msg
+
+
+
+
+3.
+
+-- if the question is to ask to get the fraction of num msg with top 1 user by with all user for each user ,then its very complex like below:
+create table t1 (
+  select u, ux, sum(n_msg) as sum_msg from
+(select date, u1 as u, u2 as ux, n_msg from table
+  union
+select date, u2 as u, u1 as ux, n_msg from table  )
+  group by 1,2
+);
+
+create table t2 (select t1.u, t1.ux, t2.max_msg from
+t1 join
+(select u, max(sum_msg) as max_msg from t1
+group by 1) t2
+on t1.u = t2.u
+and t1.n_msg = t2.max_msg
+
+);
+
+select t2.u, t2.max_msg/t3.all_msg as ratio from t2
+join
+(
+select u, sum(sum_msg) as all_msg from t1
+  group by 1
+) t3
+on t2.u = t3.u
+
+
+
+-- if the question is to ask one general number for all the users, then this would be easier:
+
+create table t1 (
+  select u, ux, sum(n_msg) as sum_msg from
+(select date, u1 as u, u2 as ux, n_msg from table
+  union
+select date, u2 as u, u1 as ux, n_msg from table  )
+  group by 1,2
+);
+
+create table t2 (select t1.u, t1.ux, t2.max_msg from
+t1 join
+(select u, max(sum_msg) as max_msg from t1
+group by 1) t2
+on t1.u = t2.u
+and t1.n_msg = t2.max_msg
+
+);
+
+-- dedup!
+
+select (sum(max_msg)  -
+(
+select sum(t1.max_msg) from
+t1 join t2
+on t1.u = t2.ux
+and t1.ux = t2.u
+
+))
+/ (select sum(n_msg) from table)
+
+
+
+e.g. t1:
+
+a b 20
+b a 20  -- duplicated
+c a 10
+d a 15
+e b 14
+f q 19
+
+
+
+
+-- in general, unique pair means you need to use union to get all user on the same column. also, use create table tablename ();
+-- do union first, then do the aggregation!!!
+
+
+-- QUESTION 5
+
+Friends
+table friending: action_id, target_id, action（accept, request, unfriend), date, time
+
+1.Calculate the overall friend accept rate within a time range.
+2.Who has most friends?
+
+
+1.
+
+-- one user could request multiple times to another user (request, cancel request, request again. Or: request, accept, unfriend, request)
+-- also one user could accept multiple request from same user.
+-- so must dedup first!
+-- Also, when do self join, normally we do a comma separated cross join.
+
+create table t1(
+action_id, count(distinct target_id) as n_request_nodup from friending
+where the action = 'request'
+  and date between date1 and date2
+group by 1
+);
+
+create table t2 (select a.action_id, count(distinct a.target_id) as n_accept_nodup from
+friending a, friending b
+where a.action_id = b.target_id
+and a.target_id = b.action_id
+and a.action = 'request'
+and b.action = 'accept'
+and a.date between date1 and date2
+and b.date between date1 and date2
+group by 1);
+
+
+select sum(n_accept_nodup)/ (select sum(n_request_nodup) from t1) from t2
+
+
+
+
+2.
+
+
+select id,
+sum(case
+  when action = 'accept' then 1
+  when action = 'unfriend' then -1
+  else 0
+end) as n_friend from
+
+(select action_id as id, action from table
+union all
+select target_id as id, action from table) tmp
+group by 1
+order by 2 desc
+limit 1
+
+
+
+-- the friend accept rate:
+-- both the request and accept must happen within the same time period.
+-- dedup!!! check if we need to have distinct in the count
+
+-- we need to check the first question if the time range means how fast the accept happen after request (then no time restrains for requests)
+-- or the specific accept rate this month (time restrains for both accept and requests)
+
+
+
+
+-- QUESTION 6
+Friend II
+Table: friending (date | time | action | actor_id | target_id)
+action = {‘send_request’,‘accept_request’}
+
+
+1.Generate friend request acceptance rate
+2.Generate the friend request acceptance rate for people who accept within 24 hours.
+
+
+
+
+1.
+create table t1 (
+select actor_id, count(distinct target_id) as n_accept from friending
+  where action = 'accept_request'
+group by 1
+
+);
+
+create table t2 (
+select actor_id, count(distinct target_id) as n_request from friending
+  where action = 'send_request'
+group by 1
+);
+
+
+select sum(n_accept) / (select sum(n_request) from t2)
+from t1
+
+2.
+
+create table t1(
+select actor_id, count(distinct target_id) as num_invite
+from table
+where action = 'send_request'
+group by 1
+);
+
+
+create table t2(
+select a.actor_id, count(distinct a.target_id) as num_get_accepted
+from table a, table b
+where a.action = 'send_request'
+and b.action = 'accept_request'
+and a.target = b.actor
+and a.actor = b.target
+and timestampdiff(hour, timestamp(a.date, a.time), timestamp(b.date, b.time)) <= 24
+group by 1
+);
+
+
+select sum(num_get_accepted) / (select sum(num_invite) from t1) as ratio
+from t2
+
+
+/*
+Review:
+Question 6 and 7 are very similar. Note that Q7-A1 is the standard answer to get a acceptance rate,
+i.e. create t1 that has each person and how many unique friends requests he sends;
+create t2, that has each person and how many unique friends requests accepted.
+
+However, when there is a time constraint, either time difference or time range constraints,
+we need to do self join in t2 creation to make sure we only select the accepted friends request
+that are qualified (after filtering by using self join and a bunch of conditions)
+
+*/
+
+
+-- QUESTION 7
+
+
+CTR
+table1: time, user_id, app, event（impression，click, null).
+
+there is a chance to pop out a window, and let users to fill in some information and submit
+
+If the user saw it and clicked it(the poped out window), then the event is click.
+If the user saw it but did not click, then the event is impression.
+The event is null, which means the user did not see it.
+
+1.Get the click through rate.
+What if CTR is over 100%? Please justify any reason that could cause this problem.
+For each impression, we might have more than one click. maybe by right click
+So we need choose the right metric to represent the click through rate.
+
+
+2.
+Here we want to clarify the difference between CTR (click through rate) and CTP (click through probability).
+When calculating we need to make sure click is from the users who viewed it.
+get CTP:
+
+
+
+
+1.
+
+create table t1 (select app, count(user_id) as cnt_click from table1
+where event = 'click'
+group by 1);
+
+
+create table t2 (select app, count(user_id) as cnt_impression from table1
+where event is not null
+group by 1);
+
+
+select t1.app, coalesce(t1.cnt_click/t2.cnt_impression, 0) as ctr from
+t1 right join t2
+on t1.app = t2.app
+
+
+2.
+
+
+create table t1 (select app, count(distinct user_id) as cnt_click from table1
+where event = 'click'
+group by 1);
+
+
+create table t2 (select app, count(distinct user_id) as cnt_impression from table1
+where event is not null
+group by 1);
+
+
+select t1.app, coalesce(t1.cnt_click/t2.cnt_impression, 0) as ctp from
+t1 right join t2
+on t1.app = t2.app
+
+
+
+如果CTR>100%是什么原因？
+
+1. more clicks:
+  1.1 bug causes multiple clicks recored
+  1.2 user right click the button
+  1.3 competitor did on purpose
+2. less impressions
+  2.1 bug caused
+  2.2 delay info for impressions
+
+
+
+
+如果现在每一个impression可能对应多个click，如何从所有click记录里面选出正确的那个记录来计算？
+What metrics would you use in this situation, and what you should do next with this error?
+
+First understand the error. If its data delay, then wait for the data to populate. (numerator, denominator)
+If 1 user clicks multiple times per impression, then cap it 100%, or dedupe at user level.
+If its competitors who wrote a program to click the ads to mess up your metrics,then FB should stop it.(the user is newly created or have few friends or never post stuff or only post recently )
+But despite the reason we can either dedupe at user level by using CTP
+
+
+
+group 1 click rate: 10%, group 2: 15%, think about possible differences: click ~ user demographic variables + behaviour variables
+Component:User, Ads (content), FB (how often)
+User:
+less active;
+Doesnt like ads;
+Active user vs. Prospect;
+Mobile vs. Big browser;
+
+Ads:less relevant (algorithm);
+Bigger vs. Smaller;
+
+
+-- For CTR we don't do dedup, unless if ctr>1, we could do dedup at user level for #clicks.
+
+
+
+-- QUESTION 8
+
+User Status
+Given a table (day) that each day shows who was active in the system
+and a table(Tracking) that tracks ongoing user status,
+write a procedure that will take each day’s active table and pass it into the ongoing daily tracking table.
+
+Possible states are:
+
+user stayed (yesterday yes, today yes)
+
+user churned (yesterday yes, today no)
+
+user revived (yesterday no, today yes)
+
+user new (yesterday null, today yes)
+
+Note: you’ll want to spot and account for the undefined state.
+
+Assume two tables, Tracking {user, state} and Day {user}
+-- check| churn | new | stayed | revived
+
+
+select coalesce(t.user, d.user) as user,
+case
+  when t.state in ('stayed', 'revived', 'new') and d.user is not null then 'stayed'
+  when t.state in ('stayed', 'revived', 'new') and d.user is null then 'churned'
+  when t.state in ('churned') and d.user is not null then 'revived'
+  when t.state is null and d.user is not null then 'new'
+  else 'check'
+end as state
+from Tracking t
+full outer join Day d
+on t.user = d.user
+
+select coalesce(t.user, d.user) as user,
+case
+  when t.state in ('stayed', 'revived', 'new') and d.user is not null then 'stayed'
+  when t.state in ('stayed', 'revived', 'new') and d.user is null then 'churned'
+  when t.state in ('churned') and d.user is not null then 'revived'
+  when t.user is null and d.user is not null then 'new'
+  else 'check'
+end as state
+from Tracking t
+full outer join Day d
+on t.user = d.user
+
+-- case when, full outer join, use coalesce for user
+
+
+
+
+-- QUESTION 9
+Notifications
+There is a table that tracks every time a user turns a feature on or off,
+with columns user_id, action (“on” or “off), date, and time.
+
+user_id | action | date | time
+
+1.How many users turned the feature on today?
+2.How many users have ever turned the feature on?
+3. How many users turned feature on till now?
+
+
+
+
+1.
+select count (distinct user_id) from table
+where action = 'on'
+and datediff('day', date, curdate()) = 0
+
+2.
+
+select count (distinct user_id) from table
+where action = 'on'
+
+3.
+
+
+select count(user_id) from
+(select user_id,
+sum(case
+  when action = 'on' then 1
+  when action = 'off' then -1
+  else 0
+end) as score from table
+group by 1
+having score = 1)t1
+
+
+-- you could aggregate the new variable from case when
+-- clarify : 1, the question is about the action to turn on or keep remaining on.
+-- 2. what is the default setting for this feature?
+-- if the default is off, then we using having score = 1
+-- if the default is on, then we use having score > -1
+
+
+
+
+
+-- QUESTION 10
+
+In a table that tracks the STATUS of every user every day, how would you add today’s data to it?
+historical_data: user_id, action (unique pair)
+today: user_id, action
+
+
+create table t(
+select user_id,
+sum(case
+  when action = 'on' then 1
+  when action = 'off' then -1
+  else 0
+end ) as score
+from today
+  group by 1
+
+)
+
+select coalesce(h.user_id, t.user_id) as user_id,
+case
+  when t.score > 0 then 'on'
+  when t.score < 0 then 'off'
+  when t.score = 0 and h.user_id is null then 'off' -- if the default is on, then here we do 'on'
+  else h.action
+end as action from
+historical_data h
+full outer join
+t
+on h.user_id = t.user_id
+
+
+-- in today, there could be multiple ons and offs! we need to get the score for today before we join the two tables
+-- we assuem the default switch is off, but might need to clarify that with interviewer
+
+
+-- QURSTION 11
+1.Given an event-level table of interactions between pairs of users
+(note that there are not duplicates in one day for one pair of users),
+for each possible number of "people interacted with" find the count for that group in a given day
+(i.e. 10 people interacted with only one person, 20 with 2, etc.).
+
+U1||u2
+Assuming that the table is consists of two columns, u1 and u2.
+
+2.
+given a table of interaction between users (user_a | user_b | day),
+find number of users who had more than 5 interactions yesterday
+(assume there is only one unique interaction between a pair of users per day).
+
+
+1. very nice
+
+select cnt, count(u) as freq from
+(select u, count(*) as cnt from
+(select u1 as u from table
+union all
+select u2 as u from table
+) t1
+group by 1)t2
+group by 1
+order by 1
+
+2.
+
+select count(u) from
+(
+select u, count(*) as cnt from
+(select uaer_a as u from table
+where datediff('day', day, curdate()) = 1
+union all
+select uaer_b as u from table
+where datediff('day', day, curdate()) = 1
+) t1
+group by 1
+having cnt > 5)t2
+
+
+
+
+-- unique pair needs union. common distribution query
+-- duplicated pair needs dedup by u1<u2 (see before sender receiver)
+
+
+
+
+
+-- QUESTION 12
+
+Ads
+two tables
+
+adv_info: advertiser_id | ad_id | spend: The Advertiser pay for this ad
+
+ad_info: ad_id | user_id | price: The user spend through this ad (Assume all prices in this column >0)
+
+
+1. The fraction of advertiser has at least 1 conversion?
+2. What would the average advertiser spend on Facebook? Your query should return a single number.
+3. What metrics would you show to advertisers ?
+4. 最后一问是有个ads_rolling table，是每个ads的lifetime_spend和lifetime_revenue。问怎么把每天新的信息加进去update这个table。
+
+
+1.
+select count(distinct advertiser_id) / (select count(distinct advertiser_id) from adv_info) from adv_info v
+join ad_info d
+on v.ad_id = d.ad_id
+
+2.
+
+select avg(spend_sum) from
+(select advertiser_id, sum(spend) as spend_sum from adv_table
+group by 1)
+
+3.
+I would like to show the ROI for each ad for each advertiser.
+
+-- investment
+create table t1 (
+select advertiser_id, ad_id, sum(spend) as inv from adv_info
+  group by 1,2
+);
+
+-- revenue
+create table t2 (
+select ad_id, sum(price) as rev from ad_info
+  group by 1
+);
+
+-- combine
+select t1.advertiser_id, v1.ad_id, cast(coalesce(rev/inv,0) as float) as roi from t1
+left join t2
+on t1.ad_id = t2.ad_id
+
+
+
+
+
+-- note that each advertiser might invest on the same ad multiple times, also one user could spend money on same ad multiple times
+-- note that we only need ad_info to calculate the rev, only need adv_info to calculate the investment
+-- we only need to join by ad_id.
+
+
+
+-- QUESTION 13
+
+Recommendations
+two tables
+
+friends_table: user_id | friend_id
+
+pages_table: user_id | post_id
+
+Write a SQL that makes recommendations using the pages that your friends liked. It should not recommend pages you already liked.
+
+
+
+
+select f.user_id, p.post_id from friends_table f
+join pages_table p
+on f.friend_id = p.user_id
+where (f.user_id, p.post_id) not in (select user_id, post_id from pages_table)
+
+
+
+-- KEY: in and not in clause could be applied to a collection of variables!
+
+
+
+
+-- QUESTION 14
+
+Phone Logins
+attempts: date | country | carrier | phone_no | type (‘login_confirmation’| ‘notification’)
+logins: date | phone_no
+
+1. How many login_confirmation was sent by different carrier in different country yesterday?
+2. the global confirmation rate has dropped, and FB thinks it could because of some carriers
+did not send out SMS confirmation message. What metric would you use to evaluate it?
+how carrier perform in each country by date?
+3.how to prioritize what top 10 countries to solve this issue?
+--  the interviewer asked me to use the previous two tables to find an answer...)
+
+
+
+
+
+1.
+select country, carrier, count(phone_no) as cnt from attempts
+where datediff('day',date,curdate()) = 1
+and type = 'login_confirmation'
+group by 1,2
+order by 1,2
+
+2.
+
+-- login table with 4 cols,  we should join here, because not all logins need verification!
+create table t1(
+  select date, country, carrier, count(distinct a.phone_no) as n_login
+  from attempts a
+  join logins l
+  on a.phone_no = l.phone_no
+  where a.date = l.date
+  group by 1,2,3
+);
+
+-- attempt table with 4 cols
+create table t2(
+  select date, country, carrier, count(distinct phone_no) as n_attempt from attempts
+  where type = 'confirmation'
+  group by 1,2,3
+
+);
+
+-- join t1 and t2 and get the rate (n_login/n_attempt)
+select t1.date, t1.country, t1.carrier, coalesce(t1.n_login/t2.n_attempt, 0) as login_rate from t1
+right join t2
+on t1.date = t2.date
+and t1.country = t2.country
+and t1.carrier = t2.carrier
+
+-- in genral not hard, but: be clear about whether to use coalesce + left join,
+-- whether to use distinct, t1 requires joining 2 tables
+
+
+3.
+prioritize by the lost number of users who cant login in each country
+
+
+create table T1 (
+select date, country, carrier, count(distinct phone_no) as num_user
+from attempts
+where type = 'login_confirmation'
+group by 1,2,3
+);
+
+
+create table T2 (
+select date, country, carrier, 1-avg(login_rate) as avg_lost_rate
+from Question3
+group by 1,2,3
+);
+
+
+select country, sum(lost) as total_lost from
+(select T1.date, T1.country, carrier, num.user * avg_lost_rate as num_lost
+from T1 join T2
+on date,country, carrier) tmp
+group by 1
+order by 2 desc
+limit 10
+
+
+
+
+
+-- QUESTION 15
+
+Article Views
+table name: article_views
+
+date  viewer_id  article_id  author_id
+
+1.How many article authors have never viewed their own article?
+2.How many members viewed more than one articles on 2017-08-01?
+
+
+
+
+1.
+select count(distinct author_id) from article_views
+where author_id not in (select distinct author_id from article_views where viewer_id = author_id)
+
+2.
+
+select count(viewer_id) from
+(select viewer_id,count(distinct article_id) as cnt from article_views
+where date = '2017-08-01'
+group by 1
+having cnt > 1) t1
+
+
+-- not in is very useful
+
+
+
+-- QUESTION 16
+Companies
+table member_id, company_name, year_start
+
+
+1.count members who ever moved from Microsoft to Google?
+2.count members who directly moved from Microsoft to Google? -- Microsoft -- Linkedin -- Google doesn't count
+
+1.
+select count(distinct a.member_id) from
+table a, table b
+where a.member_id = b.member_id
+and a.company_name = 'Microsoft'
+and b.company_name = 'Google'
+and a.year_start < b.year_start
+
+2.
+
+select count(distinct a.member_id) from
+table a, table b
+where a.member_id = b.member_id
+and a.company_name = 'Microsoft'
+and b.company_name = 'Google'
+and a.year_start < b.year_start
+and a.member_id not in
+(select distinct a.member_id from
+table a, table b, table c
+where a.member_id = b.member_id
+ and a.member_id = c.member_id
+ and a.company_name = 'Microsoft'
+ and b.company_name not in ('Microsoft', 'Google')
+ and c.company_name = 'Google'
+ and a.year_start < b.year_start
+ and b.year_start < c.year_start)
+
+
+
+-- when self join or any join, don't forget to write the where clause for primary key joinning condition
+-- first!! like member_id match!!!
+
+
+
+
+-- QUESTION 17
+Continents
+a table with: continent, country, population
+
+1.find the country with largest population in each continent, with strictly output: continent, country, population.
+Consider corner case that two country have same largest population in the same continent
+2.now for each continent, find the country with largest % of population
+
+
+1.
+
+select continent, country, population from
+(select continent, country, population, dense_rank() over (partition by 1 order by 3 desc) as rank
+from table) tmp
+where rank = 1
+
+2.
+
+create table t1 (
+  select country, rank() over(partitiion by continent order by population desc) as rank from table
+where rank = 1
+);
+
+-- top country
+create table t3 (select t2.continent, t2.country, t2.population
+from table t2
+join t1
+on t1.country = t2.country
+order by 1,2,3
+);
+
+-- total population
+create table t4 (
+select continent, sum(population) as n_total from
+table
+group by 1
+);
+
+-- combine
+select continent, country, t3.population/t4.n_total as percentage from
+t3 join t4
+on t3.continent = t4.continent
+
+
+
+
+
+-- method 2: integrated
+
+select t1.continent, t1.country, t1.population / t2.pop_sum
+from Continents t1
+join
+
+  (
+  select continent, sum(population) as pop_sum
+  from continents
+  group by 1
+
+  )t2
+  on t1.continent = t2.continent
+where country in
+  (
+  select country from
+  (select country, rank() over (partition by continent order by population desc) as rank
+  from continents
+  where rank = 1)tmp
+  )
+
+
+
+
+
+/*
+
+
+window function can only show up in select clause!!
+window function can only show up in select clause!!
+window function can only show up in select clause!!
+window function can only show up in select clause!!
+window function can only show up in select clause!!
+window function can only show up in select clause!!
+window function can only show up in select clause!!
+
+window function can't work directly with aggregation or where clause!
+window function can't work directly with aggregation or where clause!
+window function can't work directly with aggregation or where clause!
+window function can't work directly with aggregation or where clause!
+window function can't work directly with aggregation or where clause!
+window function can't work directly with aggregation or where clause!
+
+
+
+
+ROW_NUMBER : Returns a unique number for each row starting with 1. For rows that have duplicate values,numbers are arbitarily assigned.
+
+Rank : Assigns a unique number for each row starting with 1,except for rows that have duplicate values,in which case the same ranking is assigned and a gap appears in the sequence for each duplicate ranking.
+
+In the above query, obviously we should use rank() to get all countries with the same population because rank will be 1.
+
+
+1,2,2,3,4,4,5
+
+row_number: 1,2,3,4,5,6,7
+rank:       1,2,2,4,5,5,7
+dense_rank: 1,2,2,3,4,4,5
+
+
+*/
+
+
+
+-- QUESTION 18
+
+
+Projects
+SQL Given tables:
+
+employees(id, unixname, team, role, days_since_started)
+
+projects(id, name,….)
+
+commits(id, file_path, proj_id, auth_id, timestamp)
+
+Find the number of unique employees per project per month?
+
+
+
+select p.name, month, cnt from projects p
+join
+(select proj_id, datepart('month', timestamp) as month, count(distinct auth_id) as cnt from
+commits c join employees e
+on c.auth_id = e.id
+group by 1,2) t1
+on p.id = t1.proj_id
+
+
+-- read carefully with the requirement
+
+
+
+-- QUESTION 19
+
+Pivot/ Unpivot
+date  qty_prod_a  qty_prod_b  qty_prod_c
+
+1. unpivot
+you have a table t1 with the quantity of product A, B, and C sold per day, as shown above
+there are only 3 possible products in the table: A, B, and C
+write SQL code to reformat the data as shown below
+the resulting data should be in 3 columns: {date, product name, quantity sold}
+
+
+2.pivot the table above
+
+
+
+1.
+
+select * from
+(select date, 'a' as product_name, qty_prod_a as quantity_sold
+union
+select date, 'b' as product_name, qty_prod_b as quantity_sold
+union
+select date, 'c' as product_name, qty_prod_c as quantity_sold
+) t1
+order by date, product_name
+
+2.
+
+create table t_unpivot (
+select * from
+(select date, 'a' as product_name, qty_prod_a as quantity_sold
+union
+select date, 'b' as product_name, qty_prod_b as quantity_sold
+union
+select date, 'c' as product_name, qty_prod_c as quantity_sold
+) t1
+order by date, product_name
+);
+
+
+select date,
+sum(case when product_name = 'a' then quantity_sold else 0 end) as qty_prod_a,
+sum(case when product_name = 'b' then quantity_sold else 0 end) as qty_prod_b,
+sum(case when product_name = 'c' then quantity_sold else 0 end) as qty_prod_c
+from t_unpivot
+group by 1
+
+
+-- VERY important!!! for unpivot, use union; for pivot, use sum(case when) group by date, just imagine if not group by date, not use sum,
+-- the new matrix will be very sparse, with only one non-zero value each row: that's why we need to group by date and sum up.
+
+
+
+
+-- QUESTION 20
+表名：survey_log 列名：user_id, question_id, question_order, event = {saw, answered, skipped}, timestamp
+具体题目：刚加入的用户会要求填一份调查问卷，但问卷里的问题也可以跳过，每道题只要被用户见到就会生成一条记录（event为saw），
+如果被回答或者被跳过会生成另一条数据（即每道题每个用户都会有两条记录），
+回答则event为answered，跳过即为skip。并且每道题出现在每个用户前的顺序有可能不同，所以有question_order。
+假设该表里已经存了1M用户的数据，在一个新用户进来时，如何安排题目尽可能多地得到新用户的答案，减少skip？
+
+0. 在一个新用户进来时，如何安排题目尽可能多地得到新用户的答案，减少skip？
+1. get the answer rate for each question
+2. get the hightest asnwer rate question, note: can we add a threshold for impression frequency?
+3. 追问，即使按照回答率对题目进行排序，如果新来的用户已经skip掉了回答率最高和次高的题，如何动态调整题目顺序，获得此用户尽可能多的回答？
+是条件概率，要看用户之间的相似度，即已有数据中跳过了这两道题的用户回答率最高的是哪道……
+4. If one user answered, say question #30, how would you decide which question comes next?
+
+
+
+
+0. filter by question_order = 1 for both seen and answer
+select question_id, coalesce(t1.n_ans/t2.n_saw,0) as ans_rate from
+(select question_id, count(distinct user_id) as n_ans from survey_log where event = 'answered' and question_order = 1 group by 1) t1
+right join
+(select question_id, count(distinct user_id) as n_saw from survey_log where event = 'saw' and question_order = 1 group by 1 having n_saw > 10) t2
+on t1.question_id = t2.question_id
+order by 2 desc
+limit 1
+
+
+1.
+select question_id, coalesce(t1.n_ans/t2.n_saw,0) as ans_rate from
+(select question_id, count(distinct user_id) as n_ans from survey_log where event = 'answered' group by 1) t1
+right join
+(select question_id, count(distinct user_id) as n_saw from survey_log where event = 'saw' group by 1) t2
+on t1.question_id = t2.question_id
+order by 2 desc
+
+
+2.
+select question_id, coalesce(t1.n_ans/t2.n_saw,0) as ans_rate from
+(select question_id, count(distinct user_id) as n_ans from survey_log where event = 'answered' group by 1) t1
+right join
+(select question_id, count(distinct user_id) as n_saw from survey_log where event = 'saw' group by 1 having n_saw > 10) t2
+on t1.question_id = t2.question_id
+order by 2 desc
+limit 1
+
+3.
+-- suppose the top 2 question id is q_id_1 and q_id_2
+select question_id, coalesce(t1.n_ans/t2.n_saw,0) as ans_rate from
+(select question_id, count(distinct user_id) as n_ans from survey_log where event = 'answered' where user_id in (select user_id from survey_log s1, survey_log s2
+                  where s1.user_id =  s2.user_id
+                  and s1.question_id = q_id_1
+                  and s1.event = 'skip'
+                  and s2.question_id = q_id_2
+                  and s2.event = 'skip') group by 1) t1
+right join
+(select question_id, count(distinct user_id) as n_saw from survey_log where event = 'saw' where user_id in (select user_id from survey_log s1, survey_log s2
+                  where s1.user_id =  s2.user_id
+                  and s1.question_id = q_id_1
+                  and s1.event = 'skip'
+                  and s2.question_id = q_id_2
+                  and s2.event = 'skip') group by 1 having n_saw > 10) t2
+on t1.question_id = t2.question_id
+
+order by 2 desc
+limit 1
+
+4.
+-- what is the highest asnwer rate question when it is saw after question_30?
+
+select question_id, coalesce(t1.n_ans/t2.n_saw,0) as ans_rate from
+(select s2.question_id, count(distinct s2.user_id) as n_ans from survey_log s1, survey_log s2
+ where s1.user_id = s2.user_id
+ and s1.question_id = '30'
+ and s1.event = 'answered'
+ and s1.question_order - s2.question_order = 1
+ and s2.event = 'asnwered'
+ group by 1) t1
+right join
+(select s2.question_id, count(distinct s2.user_id) as n_saw from survey_log s1, survey_log s2
+ where s1.user_id = s2.user_id
+ and s1.question_id = '30'
+ and s1.event = 'answered'
+ and s1.question_order - s2.question_order = 1
+ and s2.event = 'saw'
+ group by 1 having n_saw > 10) t2
+on t1.question_id = t2.question_id
+order by 2 desc
+limit 1
+
+
+-- in question 4, we used the question_order, but in Q3 we didn't. Because in Q3 we don't have a accurate time for when did the user
+-- skip the top 2 questions, but in Q4 we know that user has just asnwered question_30, so we need to consider the order here.
+
+
+-- QUESTION 21
+SQL:
+table 1: useid|sessionid|date|event(open session/end session/scroll down/first click/send message)
+table 2: sessionid|date|sessiontime
+Q1: what is the average number of sessions per user for the past 30 days
+Q2: daily active user for the past 30 days
+
+
+1.
+
+select avg(cnt_session) from
+(select userid, count(distinct sessionid) as cnt_session from table1
+where datediff('day', curdate(),date) <= 30
+group by 1)
+
+2.
+
+-- DAU as session time > 60s and (scroll down or click or send message)
+select a.date, count(distinct a.userid) as dau from table1 a join table2 b
+on a.sessionid = b.sessionid
+where a.event in ('scroll down', 'first click', 'send message')
+and b.sessiontime > 60
+and datediff('day', curdate(), date) <= 30
+group by 1
+
+
+-- for Q1, check if we need the number for each day for the past 30 days or just one number as we do in the asnwer
+-- if for each day, then it should be:
+
+select date, avg(cnt) from
+(select date, userid, count(distinct sessionid) as cnt from table1
+where datediff('day', date, curdate()) <= 30
+group by 1,2)
+group by 1
+
+
+
+
+
+-- QUESTION 22
+SQL：
+event
+ds | host_id | action | event_id | interface
+
+action 有 start, add_location, upload_photo, publish
+interface 有android,  iphone
+
+Q1:how many events were published yesterday, on each interface？
+Q2: What percent of events that people start creating get published?
+
+1.
+select interface, count(distinct event_id) as cnt from table
+where datediff('day', ds,curdate()) = 1
+and action = 'publish'
+group by 1
+
+2.
+select cast(count(distinct event_id) / (select count(distinct event_id) from table where action = 'start') as float) as percent from table
+where action = 'publish'
+
+
+
+-- QUESTION 23
+
+Q1: what is the session/user in the last 30 days?
+
+Table： session
+column: date| sessionid | userid | event
+
+Q2: display the distribution of time(in minutes) spent by each user per day
+
+Table session
+column: date| sessionid | userid | event
+Table time
+column: date | sessionid | time(in seconds)
+
+
+1:
+
+Select count(distinct sessdionid) *1.0/count(distinct userid) as session_per_user
+from Session
+Where datediff('day', curdate(), date) <= 30
+
+2:
+
+Select date, time_spend, count(userid) as users_num
+From(
+Select s.date, s.userid , coalesce(sum(time)*1.0/60, 0.0) as time_spend,
+From session s left join time t
+And s.sessionid= t.sessionid
+And s.date= t.date
+group by 1,2
+)
+group by 1,2
+
+
+
+#### VERY important
+
+
+-- QUESTION 24
+Q1: Composer
+   user_id | date | event
+  Event: 'enter','post','cancel'。每一次enter就有一个record，但是enter的内容可能被post或者被cancel。
+  Q：what is the average rate of succesufully post on last week?
+
+
+Q2: User
+   user_id | date | country | dau_flag
+  dau_flag：active user ，可以是0或者1
+Q： what is the average rate of post for daily active user by country on today
+注：一个user没有任何post也可能是active user
+
+
+1.
+-- best answer
+-- not biased to user who has more enters
+-- reason we first do user level and then avg ratio is because each use has different denominator
+select avg(rate) from
+select user_id, sum(if(event = 'post', 1, 0)) / sum(if(event = 'enter', 1, 0)) as rate
+from composer
+where DATEDIFF('week', date, curdate()) = 1
+group by 1
+
+
+
+-- good answer: the reason why we could do this is because all where condition are the same for numerator and denominator
+-- biased to user who has more enters
+Select sum(if(event = ‘post’,1, 0)) *1.0/ sum(if(event = ‘enter’,1,0)) as post_rate
+From composer
+Where datediff(date, curdate()) <= 7
+and datediff(date, curdate()) > 0
+
+
+-- bad example:
+select count(user_id) / (select count(user_id) from composer where event = 'enter' and datediff('day', date, curdate()) <= 7 and datediff('day', date, curdate()) > 0) from composer
+where event = 'post'
+and datediff('day', date, curdate()) <= 7
+and datediff('day', date, curdate()) > 0
+
+
+-- if the question is asking successful post rate for each user, for the whole last week, then we should group by user:
+select user_id, sum(if(event = 'post', 1, 0)) / sum(if(event = 'enter', 1, 0)) as rate
+from composer
+where DATEDIFF('week', date, curdate()) = 1
+group by 1
+
+-- if the question is asking successful post rate for each user, for each day for whole last week, then we should group by user:
+
+select date, user_id, sum(if(event = 'post', 1, 0)) / sum(if(event = 'enter', 1, 0)) as rate
+from composer
+where DATEDIFF('week', date, curdate()) = 1
+group by 1,2
+
+
+2.
+
+
+select country, cast(sum(if(event = 'post', 1, 0)) / sum(if(event  = 'enter', 1, 0)), float) as rate from
+composer c join User u
+on c.user_id = u.user_id
+and c.date = u.date
+where datediff('day', date, curdate()) = 0
+and dau_flag = 1
+group by 1
+
+
+-- if we want to know the average for each DAU, then we should get the user level then do avg:
+
+select country, avg(rate) from
+(select user.country, user_id, sum(if(event = 'post', 1, 0))*1.0/sum(if(event = 'enter',1,0)) as rate
+from composer c join user u
+on c.date = u.date
+and datediff('day', date, curdate()) = 0
+and c.user_id = u.user_id
+and u.dau_flag = 1
+group by 1,2
+) tmp
+group by 1
+
+
+
+
+-- QUESTION 25
+SQL:
+user_id    session_id     sticker_id            action             nunique_shown
+                                         view/send/dismiss.
+the sticker will automatically appear ('view') in user messenger,
+then user can decide whether to 'send' or 'dismiss'
+
+Q1: which sticker performs best
+
+Q2: Once user send sticker_id = 1234, which sticker to show him next?
+
+Q3: we could get user engagement metrics like avg #stickers sent per session, to know if user like stickers.
+
+
+Good answer by using sum(if()):
+
+Q1. use sum() + if() is very good for rate or ratio type of question. Suppose 100 is a threshold for filtering low view stickers.
+
+-- simple answer:  look at the result to find the highest rate stickers
+
+select sticker_id, coalesce(sum(if(action = 'send',1,0)) * 1.0 / sum(if(action='view',1,0)), 0) as rate
+from table
+group by 1
+having sum(if(action='view',1,0)) > 100
+order by 2 desc
+
+-- fancier answer: directly give highest rate stickers. Note we can not use window function variables in where directly.
+
+select sticker_id from
+(select sticker_id, coalesce(sum(if(action = 'send',1,0)) * 1.0 / sum(if(action='view',1,0)), 0) as rate, rank() over(order by rate desc) as rank
+from table
+group by 1
+having sum(if(action='view',1,0)) > 100
+order by 2 desc) tmp
+where rank = 1
+
+
+Q2.
+
+--simple answer, without using window functions
+
+select b. sticker_id, coalesce(sum(if(b.action = 'send',1,0)) * 1.0 / sum(if(b.action='view',1,0)), 0) as rate
+from table a, table b
+where a.user_id = b.user_id
+and a.session_id = b.session_id
+and a.sticker_id = '1234'
+and a.action = 'send'
+and a.order + 1 = b.order
+group by 1
+having sum(if(b.action='view',1,0)) > 100
+
+-- Count()will excluded null values
+
+1. -- send prob, but also a filter for view time, say 100 times
+
+create table t1(
+  select sticker_id, count(distinct session_id) as cnt from table
+  where action = 'send'
+  group by 1
+);
+
+create table t2(
+  select sticker_id, count(distinct session_id) as cnt from table
+  where action = 'view'
+  group by 1
+  having cnt > 100
+);
+
+select sticker_id, coalesce(t1.cnt/t2.cnt, 0)*1.0 as rate from t1 right join t2
+on t1.sticker_id = t2.sticker_id
+order by 2 desc
+limit 1
+
+"""
+select sticker_id, rank() over(order by rate) as rank from
+(select sticker_id, coalesce(t1.cnt/t2.cnt, 0)*1.0 as rate from t1 right join t2
+on t1.sticker_id = t2.sticker_id
+order by 2 desc)
+where rank = 1
+
+"""
+
+2.
+
+create table t1(
+  select t2.sticker_id, count(distinct t2.session_id) as cnt from table t1, table t2
+  where t1.userid = t2.userid
+  and t1.action = 'send'
+  and t2.action = 'send'
+  and t1.sticker_id = 1234
+  and t1.order - t2.order = 1
+  group by 1
+);
+
+create table t2(
+  select t2.sticker_id, count(distinct t2.session_id) as cnt from table t1, table t2
+  where t1.userid = t2.userid
+  and t1.action = 'send'
+  and t2.action = 'view'
+  and t1.sticker_id = 1234
+  and t1.order - t2.order = 1
+  group by 1
+  having cnt > 100
+);
+
+select sticker_id, coalesce(t1.cnt/t2.cnt, 0)*1.0 as rate from t1 right join t2
+on t1.sticker_id = t2.sticker_id
+order by 2 desc
+limit 1
+
+
+
+
+
+
+
+-- QUESTION 26
+
+
+Table Account ID
+Account    date    Status  Spend
+123           08-08-2018     Open    4
+123           08-09-2018     Open    0
+123           08-10-2018     Fraud    2
+123           08-11-2018     Fraud    0
+
+Active定义是spend > 0
+
+Q1: Whats the percentage of fraud user in active user in each date
+Q2: How many user are first time labled as 'Fraud' Today
+
+
+
+
+
+A1.
+
+two-table methods!
+t1. both fruad and active
+t2. only active
+join and devide
+
+-- numerator
+create table t1(
+    select date, count(account) as numerator
+    from table
+    where Satus = 'Fraud'
+    and Spend > 0
+    group by 1
+);
+
+-- denom
+create table t2(
+    select date, count(account) as denom
+    from table
+    and Spend > 0
+    group by 1
+);
+
+-- join
+select t1.date, coalesce(numertor/denom) as prop
+from t1 right join t2
+on t1.date = t2.date
+
+
+
+
+
+A2.
+
+select count(account) as num_first_fraud
+from table
+where status = 'Fraud'
+and date is today
+and account not in (
+  select account from table
+  where status = 'Fraud'
+  and date is not today
+)
+-- need to check, if one account could have multiple records in one day.
+-- if yes, we need to aggregate to get data for each day.
+
+
+
+-- QUESTION 27
+
+
+Session table
+Date, sessionid, userid, action (login/exit/logout)
+
+Time table
+Date, Sessionid, time_spent (s)
+
+Q1: Average #sessions/user per day within the last 30 days
+
+-- if ask what is "#sessions/user every day within the last 30 days",
+-- it might be a daily metrics, but here the average should be one number!
+reason we first do daily and then avg is because each day has different denominator , or #user
+
+select avg(session_per_user) from
+(Select date, count(sessionid)*1.0/count(distinct userid) as session_per_user
+From session
+Where datediff(‘2018-10-26’,date)<=30
+Group by 1)
+
+
+Q2:  # of users who at least spent more than 10s on each session
+select count(userid) from
+(Select userid
+From session s join time t
+On s.sessionid = t.sessionid
+group by 1
+having min(time_spent) > 10
+)
+
+Q3: Average time spent per session per user within the last 30 days
+-- need clarify
+
+-- single value, average time spent per session per user
+select avg(time_s1) from
+(
+select userid, avg(coalesce(time_spent, 0)) as time_s1 from session s left join time t
+on s.userid = t.userid
+and s.date=t.date
+and datediff('day', date, curdate()) <= 30
+group by 1
+)
+
+-- one value each user, average time spent per session  FOR each user
+select userid, avg(coalesce(time_spent, 0)) as time_s1 from session s left join time t
+on s.userid = t.userid
+and datediff('day', date, curdate()) <= 30
+group by 1
+
+
+
+
+Q4: Plot the histogram of avg(time_spent).
+How do you know within certain time period, how many people are in there?
+
+Select time_s1， count(userid) as cnt
+from
+(
+select userid, avg(coalesce(time_spent, 0)) as time_s1 from session s left join time t
+on s.userid = t.userid
+where session_id = '1'
+and datediff('day', date, curdate()) <= 30
+group by 1
+) p
+Where p.time_s1>10s and p.time_s1<20s
+group by 1
+
+
+-- QUESTION 28   (compare with question 14)
+sms_message (fb to users)
+|    date     |     country    |  cell_numer     | carrier   |      type
+|2018-12-06   |        US      |  xxxxxxxxxx     | verizon   | confirmation (ask user to confirm)
+|2018-12-05   |         UK     |  xxxxxxxxxx     | t-mobile  |  notification
+
+confirmation (users confirmed their phone number)
+|date  |   cell_number |
+(User can only confirm during the same day FB sent the confirmation message)
+
+
+Q1: yesterday how many confirmation texts by country.
+Q2: Number of users who received notification every single day during the last 7 days.
+Q3: On dec 06th, overall confirmation rate
+
+
+1.
+select country, count(cell_number) from sms_message
+where datediff('day', date, curdate()) = 1
+and type = 'confirmation'
+group by 1
+
+2.
+
+select count(cell_number) from
+(selelct cell_number from sms_message
+where datediff('day', date, curdate()) in (1,2,3,4,5,6,7)
+and type = 'notification'
+group by 1
+having count(date) = 7)
+
+3.
+
+select count(distinct cell_number) / (select count(distinct cell_numer) forom sms_message
+where date = '2018-12-06'
+and type = 'confirmation')
+from confirmation
+where date = '2018-12-06'
+
+-- THIS question and question 14 are very important, appeared in more than 5 times in the interviews.
+
+
+
+
+
+
+
+-- QUESTION 29
+
+--I can use the table from previous questions
+given Users {id|country}, Videos{userid|videoid|duration|...}
+Q1: find total_watch_time for each country
+Q2: find top three country with highest total watch time
+Q3: find average of watch time for non-top 3 countries (answer is just one number)
+
+1.
+select country, coalesce(sum(duration)，0) as total_watch_time from
+Users u left join Videos v
+on u.id = v.userid
+group by 1
+
+2.
+select country from
+(select country, sum(coalesce(duration, 0)) as total_watch_time from
+Users u left join Videos v
+on u.id = v.userid
+group by 1
+order by 2 desc
+limit 3)
+
+3.
+select avg(total_watch_time) from
+(select country, sum(coalesce(duration, 0)) as total_watch_time from
+Users u left join Videos v
+on u.id = v.userid
+where country not in
+(
+select country from
+(select country, sum(coalesce(duration, 0)) as total_watch_time from
+Users u left join Videos v
+on u.id = v.userid
+group by 1
+order by 2 desc
+limit 3)
+)
+group by 1)
+
+
+
+
+
+-- QUESTION 30
+
+数据表有两张，均为userlog, 对于A表：每一次用户进入页面分派一个unique session id，用户离开则这一个session结束，
+期间用户的每一个行为都会生成一条记录；对于表B：记录一条session存在的时间。
+A: date, session_id, user_id, act('enter', 'exit', 'post')--can be duplicated
+B: date, session_id, time_spent --date and session_id are primary keys.
+
+Q1：generate average (number of session per user) per day.
+Q2: generate number of user per time interval. in order to measure how many user is spending certain amount of time.
+
+--clarify:averqge session time/user or total session time eper user?
+
+Q1.
+
+select avg(p) from
+(select date, count(distinct session_id) / count(distinct user_id) as p
+from A
+group by 1) tmp
+
+-- Q2. ask about average individual session time. we do avg for each user first.
+-- this makes more sense
+
+select avg_session_time, count(distinct user_id) from
+(select user_id, avg(time_spent) as avg_session_time
+from A join B
+on A.date = B.date
+and A.session_id = B.session_id
+group by 1) tmp
+group by 1
+
+
+-- Q2. another understanding: don't do average for each user. ask about all individual session time.
+-- this is probably not right, because it will be biased to users who have more sessions
+
+select avg_session_time, count(user_id) from
+(select user_id, time_spent
+from A join B
+on A.date = B.date
+and A.session_id = B.session_id) tmp
+group by 1
+
+
+
+-- Q2. aaaanother understanding: asking about total time / user.
+
+select time_total, count(user_id) as cnt from
+(select A.user_id, coalesce(sum(time_spent), 0) as time_total
+A left join B
+on A.user_id = b.user_id
+group by 1)
+group by 1
+order by 1
+
+
+
+-- QUESTION 31
+
+Table: user_actions
+ds(date, String) | user_id | post_id | action ('view','like','reaction','comment','report','reshare') | extra (extra reason for the action, e.g. 'love','spam','nudity')
+Q1: how many posts were reported yesterday for each report Reason?
+
+
+introduce a new table: reviewer_removals,
+ds(date, String) | reviewer_id |post_id
+Q2: please calculate what percent of daily content that users view on FB is actually spam?
+
+
+
+1.
+--dedup
+select extra, count(distinct post_id) as cnt from user_actions
+where action = 'report'
+and datediff('day', ds, curdate()) = 1
+and extra != 'love'
+group by 1
+
+2.
+
+create table t1 (
+  select ds, count(distinct post_id) as cnt_view from user_actions
+  where action = 'view'
+  group by 1
+);
+
+create table t2 (
+  select ds, count(distinct post_id) as cnt_spam from reviewer_removals
+  group by 1
+);
+
+select ds, coalesce(cnt_spam / cnt_view, 0) as spam_rate from t1 left join t2
+on t1.ds = t2.ds
+
+
+
+
+-- QUESTION 32
+
+-- ad4ad, i think it is ad for advertisers!
+
+ad4ad
+user_id | date | event (impression/click/create_ads) | event_id | cost | spend
+
+user
+user_id | age | country.
+
+Q1: impressions per country at 2018 Decemeber
+
+1.
+select country, coalesce(count(distinct event_id), 0) as cnt from ad4ad right join user u
+on a.user_id = u.user_id
+where event = 'impression'
+and datepart('month', date) = 12
+and datepart('year', date) = 2018
+group by 1
+
+-- extract(month from date) as month also works!
+
+-- QUESTION 32.5:    ad4ad
+-- table a: date | event('impression','click','create_ad') | user_id | item_id | cost | spend
+-- table b: user_id | country | date
+
+-- Q1. last 30 days, by country, total spend (问的是facebook的spend就是表里的cost） of the product
+-- Q2. Number of users that FB has invited in the last 30 days for each country
+-- Q3. Avg number of impressions per user per item before user creates ad?
+
+
+-- A1.
+
+select country, coalesce(sum(cost), 0) as fb_cost
+from a right join b
+on a.user_id = b.user_id
+and a.date = b.date
+and datediff('day', a.date, curdate()) <= 30
+and datediff('day', a.date, curdate()) > 0
+group by 1
+
+--A2.
+
+select country, coalesce(count(distinct user_id), 0) as num_user
+from a right join b
+on a.user_id = b.user_id
+and a.date = b.date
+and datediff('day', a.date, curdate()) <= 30
+and datediff('day', a.date, curdate()) > 0
+group by 1
+
+
+-- A3.
+
+create table t0(
+  select a.user, a.item, count(a.event) as num_impression
+  from a join b
+  on a.user = b.user
+  and a.item = b.item
+  and b.event = 'create_ad'
+  and a.event = 'impression'
+  -- and a.date > b.date
+  group by 1,2
+);
+
+select avg(num_impression_user) from
+(select item, avg(impression) as num_impression_user
+from t0
+group by 1)tmp
+
+-- note that for Q3, we should first get average #impression/user for each item, then avg that.
+-- The reason is, each item have different number of users, if we just to overall avg, the result will biased to
+-- the ad item that has more #users.
+
+
+
+
+
+-- QUESTION 33
+给一个表有四个column：time, user_id, app_id, event ('imp' or 'click') 。大致意思：当一个user在玩一个app时，
+有一定几率会弹出一个窗口让user 添加信用卡（event "imp"），如果这个user按了 yes，那就是一个 click的event.
+如何来判定这个弹窗口的效果？（click through rate），
+1. 如何看哪个app click through rate最高，
+2. 如何知道这个table的信息是否正确 （比如user 按了一次 yes，结果自动生成多次 click event）
+
+-- can we also do THIS?
+-- yeah, but this can't dedup if multiple clicks for one user.
+
+select app_id, sum(if(event = 'click',1,0)) * 1.0 / sum(if(event = 'saw',1,0))
+from table
+group by 1
+having sum(if(event = 'saw',1,0) > 100
+
+1.
+
+create table t1
+(select app_id, count(distinct user_id) as num_click
+from table
+where event = 'click'
+group by 1);
+
+create table t2(
+select app_id, count(user_id) as num_imp
+from table
+where event = 'imp'
+group by 1
+having count(user_id) >100 -- filter low view
+);
+
+select t1.app_id, coalesce(num_click/num_imp, 0) as ctr
+from t1 right join t2
+on t1.app_id = t2.app_id
+order by 2 desc
+
+
+2.
+
+can we just do the following?
+
+select app_id, (1 - count(distinct user_id)/count(user_id)) as dup_rate
+from table
+where event = 'click'
+group by 1
+
+
+calculate the dup rate
+
+
+create table t1
+(select app_id, count(distinct user_id) as num_click_nodup
+from table
+where event = 'click'
+group by 1);
+
+create table t2
+(select app_id, count(user_id) as num_click
+from table
+where event = 'click'
+group by 1);
+
+
+select t1.app_id, (num_click - num_click_nodup)/num_click as dup_rate
+from t1 join t2
+on t1.app_id = t2.app_id
+order by 2 desc
+
+
+
+-- QUESTION 34
+
+Table Account ID
+Account    date    Status  Spend
+123           08-08-2018     Open    4
+123           08-09-2018     Open    0
+123           08-10-2018     Fraud    2
+123           08-11-2018     Fraud    0
+
+Active定义是spend > 0
+
+Q1: What is the percentage of fraud user in active user in each date
+Q2: How many user are first time labled as Fraud Today
+Q3 如果给被report为fraud的账户申诉的机会，有什么financial benefit
+DAU -> Ads conversion/impression -> revenue
+
+1.
+
+-- #fruad user
+create table t1(
+select date, count(distinct account) as num_fraud
+from table
+where status = 'fraud'
+and spend > 0
+group by 1
+);
+
+-- #active user
+
+create table t1(
+select date, count(distinct account) as num_active
+from table
+and spend > 0
+group by 1
+);
+
+select t1.date, coalesce(num_fraud/num_active,0) as rate
+from t1 right join t2
+on t1.date = t2.date
+
+
+###############
+
+2.
+
+select count(distinct account) as num_first_fraud
+from table
+where Status = 'fraud'
+and datediff('day'. date, curdate()) = 0
+and account not in (
+  select account from table
+  where Status = 'fraud'
+  and datediff('day', date, curdate()) > 0
+)
+
+###
+
+Select count(distinct account) as n_first_fraud
+from
+(select account, min(date) as first_date
+From account_id
+Where status='fraud'
+Group by account
+)sub
+where first_date=date(now())
+
+
+
+
+
+-- QUESTION 35
+
+SQL/Tech:
+FB Search Rating: 请用户对于他搜索的结果进行评分来测量搜索引擎的Health
+Search_Result || Result_ID || Postion || Rating
+"Dog" || 1234 || 1 || 5
+"Dog" || 1123 || 2 || 4
+
+Search_Result: 搜索词
+Result_ID： 搜索词输入后出现的结果
+Position: 在该搜索下出现的顺序
+Rating：客户对于这个位置的这个结果的满意度
+
+1. 你怎么算Rating
+2. How do you take position in rating
+3. 如果有一个Ideal Rating Table （一样的Dataset就是Rating/Position不同），如何算两个Table的区别 .
+
+
+1. weighted average.
+2. weighted average...
+3. generate the weighted score for each search, then we have a pair of scores for the rater and the ground truth.
+After we generate a bunch of such pairs of data, we could do a paired t test to see if there is a significant difference
+between the two.
+
+weight for position i is 1/(2^i)
+because 1/2 + 1/2^2 + 1/2^3 + .... ~= 1
+geometric series!
+Sn = a1(1-q^n)/(1-q)
+
+
+select Search_Result, sum(final_rating_part) from
+(select Search_Result, (1/power(2,position)) * Rating as final_rating_part
+from table)
+group by 1
+
+
+
+
+
+
+-- QUESTION 35
+-- date, timestamp, sender, receiver
+
+-- Q1. proportion of people who communicating to 5+ people on a day?
+-- Q2. fraction of people who respond within 60s
+-- Q3. Distribution of unique contacts: x-# of unique contacts y-# of users with this number of unique contacts
+-- Q4. message replied rate -- remove duplicates!
+
+
+A1. say just today. If we want to calculate this proportion for each day, we need to generate a three column table and some additional tables.
+
+create table t1(
+select user, count(distinct people) as num_people from
+(select sender as user, receiver as people from table where date is today
+union -- use union to dedup
+select receiver as user, sender as people from table where date is today) tmp
+group by 1
+);
+
+
+select count(user) / (select count(user) from t1) as proportion
+from t1
+where num_people > 5
+
+
+-- if there is a n_msg, we use union all, but then sum(n_msg), filter by u1<u2 and group by u1,u2
+
+
+
+-- if ask about each day, it will be:
+create table t1(
+select date, user, count(distinct people) as num_people from
+(select date, sender as user, receiver as people from table
+union all
+select date, receiver as user, sender as people from table) tmp
+group by 1,2
+);
+
+
+-- numerator
+create table t2(
+  select date, count(user) as num_numerator
+  from t1
+  where num_people > 5
+);
+
+-- denominator
+create table t3(
+  select date, count(user) as num_denominator
+  from t1
+);
+
+select t3.date, coalesce(num_numerator/num_denominator,0) as proportion
+from t2 right join t3
+on t2.date = t3.date
+
+
+A2.
+
+if a person ever replied message within 60 second, this person is qualified?
+Or it has to be all messages sent to this person is replied within 60s?
+
+let us go with 1st situation first.
+
+select count(distinct a.receiver_id) / (select count(distinct receiver_id from table)) as proprtion
+from table a, table b
+where a.sender_id = b.receiver_id
+and a.receiver_id = b.sender_id
+and timestampdiff('second', timestamp(a.date, a.time), timestamp(b.date, b.time)) <= 60
+and timestampdiff('second', timestamp(a.date, a.time), timestamp(b.date, b.time)) >= 0
+
+
+
+A3. good
+create table t1(
+  select distinct sender as user, receiver as contacts from table
+  union
+  select distinct receiver as user, sender as contacts from table
+);
+
+create table t2(
+(select user, count(contacts) as num_unique
+from t1
+where contacts not in
+(select a.contacts from
+t1 a, t1 b
+where a.user != b.user
+and a.contacts = b.contacts)
+group by 1)
+);
+
+select num_unique, count(user) as freq
+from t2
+group by 1
+
+
+A4.
+
+select count(distinct a.receiver_id) / (select count(receiver_id from table)) as proprtion
+from table a, table b
+where a.sender_id = b.receiver_id
+and a.receiver_id = b.sender_id
+and timestampdiff('second', timestamp(a.date, a.time), timestamp(b.date, b.time)) >= 0
+
+
+
+QUESTION 36
+
+一道SQL题，window function，请高手解答下。根据cus_id和date生成count，count 的意思是过去7天（不包含当天），有几个不同的cus_id出现
+cus_id, date, count
+c1, 12/1, 0
+c1, 12/2, 1
+c2, 12/3, 1
+c3, 12/9, 2
+比如最后一行 c3, 12/9, 2，这个count 2 是由 12/8 到 12/2 (7天) 里出现的distinct cus_id count, 也就是c2, c1,一共2 个。
+
+SELECT t1.date, t1.cus_id, COUNT(DISTINCT t2.cus_id) AS cnt
+FROM table t1
+LEFT JOIN table t2
+ON t1.date - t2.date BETWEEN 1 AND 7
+GROUP BY t1.date
+ORDER BY t1.date
+
+
+
+
+
+
+
+Table1     User1| user2
+              123      456
+              456    123
+
+这道题和面试官确认过record是会有duplicate的，所以不用union all，直接group by count 就可以了
+
+Q： find top 10 users with most number of friends
+
+
+select User1, count(distinct user2) as num_friend
+from table1
+group by 1
+order by 2 desc
+limit 10
+
+
+
+2.        又给了一个table
+Table2        sender_id|recipient_id|action|content_type|Content_id|date
+
+Action 是create或者delete
+Cotntent_type可以是comment，reaction，reshare
+Content_id就只是id of content，如果是comment的话就是comment_id
+Q：Output the interaction betw‍‌‍‍‍‍‌‍‌‍‍‍‍‌‍‍‌een each pair of friendships in 2018.
+
+
+define interaction as harmomic mean of #interactions between the 2.
+
+create table t1
+(select t1.user1, t1.user2, coalesce(count(content_id), 0) as num_actions
+from table1 t1 left join table2 t2
+on t1.user1 = sender_id
+and t1.user2 = recipient_id
+and action = 'create'
+group by 1,2);
+
+select t1.user1, t1.user2, coalesce(2/(1/t1.num_actions + 1/t2.num_actions), 0) as harmonic_interaction
+from t1, t2
+where t1.user1 = t2.user2
+and t1.user2 = t2.user1
+and t1 > t2 -- dedup
+
+
+ -- Or just get the sum!!!
+
+create table t1
+ (select t1.user1, t1.user2, coalesce(count(content_id), 0) as num_actions
+ from table1 t1 left join table2 t2
+ on t1.user1 = sender_id
+ and t1.user2 = recipient_id
+ and action = 'create'
+ group by 1,2);
+
+
+select user, friend, sum(num_action) as total_ineractio from
+(select user1 as user, user2 as friend, num_action
+union all
+select user1 as user, user2 as friend, num_action )tmp
+where user < friend
