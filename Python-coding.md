@@ -7,6 +7,7 @@ count = sum(1 for line in open('path_to_file') for char in line if char.isupper(
 * What if the file is very large?
 
 `
-with open('path_to_file') as file:
+with open('path_to_file') as file:  
+
     count = sum(1 for line in file for char in line if char.isupper())
 `
