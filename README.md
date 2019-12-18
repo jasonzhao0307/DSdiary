@@ -6,5 +6,5 @@ It will include content such as:
 * Machine learning
 * Statistics
 * Deep learning
-* Coding(Algorithm and data structure, leetcode style)
-* Coding(python, scripting, data manipulation style)
+* Python coding(Algorithm and data structure, leetcode style)
+* Python coding(scripting, data manipulation, non-LC style)
